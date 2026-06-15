@@ -1,0 +1,42 @@
+import glob, sys
+from pyscf import dft, gto
+import numpy as np
+np.set_printoptions(threshold=sys.maxsize)
+
+mol = gto.M(atom='filename.xyz', spin=0, charge=0, basis='aug-cc-pvdz')
+mol.build()
+if mol.spin==0:
+    mf = dft.RKS(mol)
+    mf.grids.level = 2
+    mf = mf.run()
+    dm = mf.make_rdm1()
+else:
+    mf = dft.UKS(mol)
+    mf.grids.level = 2
+    mf = mf.run()
+    dm = mf.make_rdm1()
+weights = mf.grids.weights
+coords = mf.grids.coords
+ao = dft.numint.eval_ao(mol, coords, deriv=2)
+nuc_e = mf.energy_nuc()
+hcore = mf.get_hcore()
+if mol.spin==0:
+    ecoul = mf.get_veff(dm=dm).ecoul
+    e1 = np.einsum("ij,ji->", hcore, dm)
+    rho0, dx, dy, dz, lap, tau = dft.numint.eval_rho(mol, ao, dm, xctype="mgga")
+    rho_01 = rho_02 = rho0*0.5
+    sigma1=sigma12=sigma2=(dx**2+dy**2+dz**2)/4 + 1e-7
+    tau1=tau2=tau*0.5
+else:
+    ecoul = mf.get_veff(dm=dm).ecoul
+    e1 = np.einsum("ij,ji->", hcore, dm[0]+dm[1])
+    rho_01, dx1, dy1, dz1, lap1, tau1 = dft.numint.eval_rho(mol, ao, dm[0], xctype="mgga")
+    rho_02, dx2, dy2, dz2, lap2, tau2 = dft.numint.eval_rho(mol, ao, dm[1], xctype="mgga")
+    sigma1 = dx1**2+dy1**2+dz1**2+1e-7
+    sigma2 = dx2**2+dy2**2+dz2**2+1e-7
+    sigma12 = dx1*dx2+dy1*dy2+dz1*dz2+1e-7
+rhos = np.hstack([rho_01.reshape(-1,1), rho_02.reshape(-1,1), sigma1.reshape(-1,1), sigma12.reshape(-1,1),sigma2.reshape(-1,1), tau1.reshape(-1,1), tau2.reshape(-1,1)])
+print(ecoul+e1+nuc_e)
+np.savetxt("rhos_filename.txt", rhos, delimiter=",")
+np.savetxt("weights_filename.txt", weights, delimiter=",")
+np.savetxt("coords_filename.txt", coords, delimiter=",")
